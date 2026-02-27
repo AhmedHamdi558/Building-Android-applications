@@ -1,50 +1,95 @@
 name: Build Kivy APK
+
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # يسمح بتشغيل البناء يدوياً من واجهة GitHub
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+    # زيادة المهلة لأن البناء قد يستغرق وقتاً
+    timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify required files exist
+        run: |
+          if [ ! -f main.py ]; then
+            echo "❌ main.py not found in root directory!"
+            exit 1
+          fi
+          if [ ! -f buildozer.spec ]; then
+            echo "❌ buildozer.spec not found in root directory!"
+            exit 1
+          fi
+          echo "✅ Required files found."
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'  # أو 3.12 إذا كانت مدعومة من Buildozer
+          cache: 'pip'  # تخزين مؤقت لحزم pip
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            git zip unzip \
-            openjdk-17-jdk \
-            autoconf libtool \
-            pkg-config zlib1g-dev \
-            libncurses5-dev cmake \
-            libffi-dev libssl-dev \
-            build-essential
+            git zip unzip openjdk-17-jdk \
+            autoconf libtool pkg-config zlib1g-dev \
+            libncurses5-dev libffi-dev libssl-dev \
+            build-essential cmake libltdl-dev \
+            libgdbm-dev libsqlite3-dev uuid-dev \
+            python3-dev libreadline-dev
 
       - name: Install Python dependencies
         run: |
-          pip install --upgrade pip
-          pip install buildozer cython virtualenv
+          python -m pip install --upgrade pip
+          pip install --upgrade buildozer cython virtualenv
 
-      - name: Accept Android Licenses
-        run: |
-          mkdir -p $HOME/.android
-          touch $HOME/.android/repositories.cfg
-          yes | buildozer android update 2>/dev/null || true
-          find $HOME/.buildozer -name "sdkmanager" 2>/dev/null | head -1 | xargs -I {} sh -c 'yes | {} --licenses' || true
+      # استعادة ذاكرة التخزين المؤقت لـ .buildozer (SDK, NDK, dependencies)
+      - name: Cache .buildozer folder
+        uses: actions/cache@v4
+        with:
+          path: ~/.buildozer
+          key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            ${{ runner.os }}-buildozer-
 
-      - name: Build APK
+      - name: Accept Android SDK licenses
         run: |
+          # إنشاء مجلد android إذا لم يكن موجوداً
+          mkdir -p ~/.android
+          touch ~/.android/repositories.cfg
+          
+          # محاولة قبول التراخيص باستخدام buildozer أولاً
+          buildozer android update || true
+          
+          # البحث عن sdkmanager وتشغيل قبول التراخيص
+          SDKMANAGER_PATH=$(find ~/.buildozer -name "sdkmanager" 2>/dev/null | head -1)
+          if [ -n "$SDKMANAGER_PATH" ]; then
+            echo "Found sdkmanager at $SDKMANAGER_PATH"
+            yes | $SDKMANAGER_PATH --licenses
+          else
+            echo "sdkmanager not found yet. Continuing..."
+          fi
+
+      - name: Build APK with Buildozer
+        run: |
+          # يمكنك إضافة أي متغيرات بيئة إضافية هنا إذا لزم الأمر
+          # export BUILDozER_ALLOW_DOWNLOAD=1
           buildozer -v android debug
+        env:
+          # لضمان عدم توقف البناء بسبب أسئلة تفاعلية
+          BUILDozER_ACCEPT_ANDROID_LICENSES: "true"
 
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: myapp-debug
+          name: app-debug-apk
           path: bin/*.apk
+          if-no-files-found: error  # يفشل إذا لم يتم العثور على APK
