@@ -1,9 +1,43 @@
-- name: Accept Android Licenses
-        run: |
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+name: Build Kivy APK
+on:
+  push:
+    branches: [ main ]
 
-      - name: Build APK with Buildozer
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install system dependencies
         run: |
-          buildozer -v android debug
-        env:
-          BUILDOZER_WARN_ON_ROOT: 1
+          sudo apt-get update
+          sudo apt-get install -y \
+            git zip unzip \
+            openjdk-17-jdk \
+            autoconf libtool \
+            pkg-config zlib1g-dev \
+            libncurses5-dev cmake \
+            libffi-dev libssl-dev \
+            build-essential
+
+      - name: Install Buildozer
+        run: |
+          pip install --upgrade pip
+          pip install buildozer cython virtualenv
+
+      - name: Build APK
+        run: |
+          yes | buildozer -v android debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: myapp-debug
+          path: bin/*.apk
