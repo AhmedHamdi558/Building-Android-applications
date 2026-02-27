@@ -33,8 +33,10 @@ jobs:
           pip install buildozer cython virtualenv
 
       - name: Build APK
+        env:
+          ANDROIDSDK: /home/runner/.buildozer/android/platform/android-sdk
         run: |
-          yes | buildozer -v android debug
+          buildozer -v android debug 2>&1
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
